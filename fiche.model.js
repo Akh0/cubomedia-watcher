@@ -12,11 +12,15 @@ var FicheSchema = new Schema({
     code: String,
     originalTitle: String,
     title: String,
+    synopsis: String,
     productionYear: Number,
     pressRating: Number,
     userRating: Number,
     posterHref: String,
-    link: String
+    posters: Array,
+    link: String,
+    trailerEmbedHref: String,
+    genre: String
 });
 
 module.exports = mongoose.model('Fiche', FicheSchema);

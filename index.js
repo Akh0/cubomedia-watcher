@@ -3,9 +3,9 @@
 var recursive = require('recursive-readdir'),
     watch = require('watch'),
     fs = require('fs'),
-    //q = require('q'),
     mongoose = require('mongoose'),
     allocine = require('allocine-api'),
+    htmlparser = require('htmlparser2'),
     Fiche = require('./fiche.model'),
     config = require('./config'),
     filenameParser = require('./lib/filenameParser'),
@@ -41,22 +41,65 @@ module.exports = function (videoDirectory) {
                         if (!err && results.feed.movie) {
                             // TODO: Voir comment faire en cas de résultat multiple
                             var movie = results.feed.movie[0];
-                            console.log(movie);
+
                             movieFiche.code = movie.code;
-                            movieFiche.originalTitle = movie.originalTitle;
-                            movieFiche.title = movie.title;
-                            movieFiche.productionYear = movie.productionYear;
-                            movieFiche.pressRating = movie.statistics.pressRating;
-                            movieFiche.userRating = movie.statistics.userRating;
-                            movieFiche.posterHref = movie.poster.href;
-                            movieFiche.link = movie.link[0].href;
 
-                            allocine.api('movie', { code: movie.code });
+                            allocine.api('movie', { code: movie.code }, function(err, result) {
+                                var movie = result.movie;
+
+                                movieFiche.originalTitle = movie.originalTitle;
+                                movieFiche.title = movie.title;
+                                movieFiche.synopsis = movie.synopsis;
+                                movieFiche.productionYear = movie.productionYear;
+                                movieFiche.pressRating = movie.statistics.pressRating;
+                                movieFiche.userRating = movie.statistics.userRating;
+                                movieFiche.posterHref = movie.poster.href;
+                                movieFiche.link = movie.link[0].href;
+
+                                var parser = new htmlparser.Parser({
+                                    onopentag: function(name, attrs) {
+                                        if(name === 'iframe')
+                                            movieFiche.trailerEmbedHref = attrs.src;
+                                    }
+                                });
+
+                                parser.write(movie.trailerEmbed);
+                                parser.end();
+
+                                movieFiche.genre = '';
+
+                                movie.genre.forEach(function(genre) {
+                                   movieFiche.genre += genre.$ + ', ';
+                                });
+
+                                if(movie.genre.length > 2)
+                                    movieFiche.genre = movieFiche.genre.slice(0, -2);
+
+                                movieFiche.posters = [];
+
+                                movie.media.forEach(function(media) {
+                                    if(media.type.code === 31001 || media.type.code === 31006) { // Affiche || Photo
+                                        movieFiche.posters.push({
+                                            href: media.thumbnail.href,
+                                            width: media.width,
+                                            height: media.height,
+                                            type: media.type.code === 31001 ? 'affiche' : 'photo'
+                                        })
+                                    }
+                                });
+
+                                movieFiche.save(mongoDBErrorHandler);
+
+                                //fs.writeFile('/home/achille/CUBOMEDIA-WATCHER.json', JSON.stringify(result, null, 4), function(err) {
+                                //    if(err) {
+                                //        console.log(err);
+                                //    } else {
+                                //        console.log("JSON saved to " + outputFilename);
+                                //    }
+                                //});
+                            });
                         }
-
-                        movieFiche.save(mongoDBErrorHandler);
                     });
-
                 }
             });
         }
