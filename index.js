@@ -14,90 +14,151 @@ var recursive = require('recursive-readdir'),
 
 mongoose.connect(config.mongoURI);
 
-module.exports = function (videoDirectory) {
-    if (!videoDirectory)
-        videoDirectory = config.videoDirectory;
+module.exports = function () {
 
-    var addNewRecord = function (filepath, inode) {
+    var addNewRecord = function (filepath, inode, username) {
 
         if (filetype.isVideo(filepath)) {
             var title = filenameParser.getWorkTitle(filepath);
-            Fiche.findOne({ inode: inode }, function (err, fiche) {
-                if(err) {
+            Fiche.findOne({inode: inode, user: username}, function (err, fiche) {
+                if (err) {
                     mongoDBErrorHandler(err);
                     return;
                 }
 
                 // Si la fiche n'existe pas encore
                 if (!fiche) {
-                    allocine.api('search', { q: title, count: 1 }, function (err, results) {
-                        var movieFiche = new Fiche({
+                    var queryParams = {q: title, count: 1};
+
+                    if(filenameParser.isSerie(filepath)) {
+                        queryParams.filter = 'tvseries';
+                    }
+                    else {
+                        queryParams.filter = 'movie';
+                    }
+
+                    allocine.api('search', queryParams, function (err, results) {
+                        var fiche = new Fiche({
                             filepath: filepath,
                             name: title,
                             type: 'video',
-                            inode: inode
+                            inode: inode,
+                            user: username,
+                            category: queryParams.filter
                         });
 
-                        if (!err && results.feed.movie) {
-                            // TODO: Voir comment faire en cas de résultat multiple
-                            var movie = results.feed.movie[0];
+                        if (!err) {
+                            if (results.feed.movie) {
+                                var movie = results.feed.movie[0];
+                                fiche.code = movie.code;
 
-                            movieFiche.code = movie.code;
+                                allocine.api('movie', {code: movie.code}, function (err, result) {
+                                    var movie = result.movie;
 
-                            allocine.api('movie', { code: movie.code }, function(err, result) {
-                                var movie = result.movie;
+                                    fiche.originalTitle = movie.originalTitle;
+                                    fiche.title = movie.title;
+                                    fiche.synopsis = movie.synopsis;
+                                    fiche.productionYear = movie.productionYear;
+                                    fiche.pressRating = movie.statistics.pressRating;
+                                    fiche.userRating = movie.statistics.userRating;
+                                    fiche.link = movie.link[0].href;
 
-                                movieFiche.originalTitle = movie.originalTitle;
-                                movieFiche.title = movie.title;
-                                movieFiche.synopsis = movie.synopsis;
-                                movieFiche.productionYear = movie.productionYear;
-                                movieFiche.pressRating = movie.statistics.pressRating;
-                                movieFiche.userRating = movie.statistics.userRating;
-                                movieFiche.posterHref = movie.poster.href;
-                                movieFiche.link = movie.link[0].href;
+                                    var parser = new htmlparser.Parser({
+                                        onopentag: function (name, attrs) {
+                                            if (name === 'iframe')
+                                                fiche.trailerEmbedHref = attrs.src;
+                                        }
+                                    });
 
-                                var parser = new htmlparser.Parser({
-                                    onopentag: function(name, attrs) {
-                                        if(name === 'iframe')
-                                            movieFiche.trailerEmbedHref = attrs.src;
-                                    }
+                                    parser.write(movie.trailerEmbed);
+                                    parser.end();
+
+                                    fiche.genre = '';
+
+                                    movie.genre.forEach(function (genre) {
+                                        fiche.genre += genre.$ + ', ';
+                                    });
+
+                                    if (movie.genre.length > 2)
+                                        fiche.genre = fiche.genre.slice(0, -2);
+
+                                    fiche.posters = [];
+
+                                    movie.media.forEach(function (media) {
+                                        if (media.type.code === 31001 || media.type.code === 31006) { // Affiche || Photo
+                                            fiche.posters.push({
+                                                href: media.thumbnail.href,
+                                                width: media.width,
+                                                height: media.height,
+                                                type: media.type.code === 31001 ? 'affiche' : 'photo'
+                                            })
+                                        }
+                                    });
+
+                                    fiche.save(mongoDBErrorHandler);
+
+                                    //fs.writeFile('/home/achille/CUBOMEDIA-WATCHER.json', JSON.stringify(result, null, 4), function(err) {
+                                    //    if(err) {
+                                    //        console.log(err);
+                                    //    } else {
+                                    //        console.log("JSON saved to " + outputFilename);
+                                    //    }
+                                    //});
                                 });
+                            }
+                            else if(results.feed.tvseries) {
+                                var tvserie = results.feed.tvseries[0];
+                                fiche.code = tvserie.code;
 
-                                parser.write(movie.trailerEmbed);
-                                parser.end();
+                                allocine.api('tvseries', {code: tvserie.code, profile: 'large'}, function (err, result) {
+                                    var tvserie = result.tvseries;
 
-                                movieFiche.genre = '';
+                                    fiche.originalTitle = tvserie.originalTitle;
+                                    fiche.title = tvserie.title;
+                                    fiche.synopsis = tvserie.synopsis;
+                                    fiche.productionYear = tvserie.yearStart;
+                                    fiche.pressRating = tvserie.statistics.pressRating;
+                                    fiche.userRating = tvserie.statistics.userRating;
+                                    fiche.link = tvserie.link[0].href;
 
-                                movie.genre.forEach(function(genre) {
-                                   movieFiche.genre += genre.$ + ', ';
+                                    var parser = new htmlparser.Parser({
+                                        onopentag: function (name, attrs) {
+                                            if (name === 'iframe')
+                                                fiche.trailerEmbedHref = attrs.src;
+                                        }
+                                    });
+
+                                    parser.write(tvserie.trailerEmbed);
+                                    parser.end();
+
+                                    fiche.genre = '';
+
+                                    tvserie.genre.forEach(function (genre) {
+                                        fiche.genre += genre.$ + ', ';
+                                    });
+
+                                    if (tvserie.genre.length > 2)
+                                        fiche.genre = fiche.genre.slice(0, -2);
+
+                                    fiche.posters = [];
+
+                                    tvserie.media.forEach(function (media) {
+                                        if (media.type.code === 31001 || media.type.code === 31006) { // Affiche || Photo
+                                            fiche.posters.push({
+                                                href: media.thumbnail.href,
+                                                width: media.width,
+                                                height: media.height,
+                                                type: media.type.code === 31001 ? 'affiche' : 'photo'
+                                            })
+                                        }
+                                    });
+
+                                    fiche.save(mongoDBErrorHandler);
+
+                                    fs.writeFile('/home/achille/CUBOMEDIA-WATCHER.json', JSON.stringify(result, null, 4), function(err) {
+                                    });
                                 });
-
-                                if(movie.genre.length > 2)
-                                    movieFiche.genre = movieFiche.genre.slice(0, -2);
-
-                                movieFiche.posters = [];
-
-                                movie.media.forEach(function(media) {
-                                    if(media.type.code === 31001 || media.type.code === 31006) { // Affiche || Photo
-                                        movieFiche.posters.push({
-                                            href: media.thumbnail.href,
-                                            width: media.width,
-                                            height: media.height,
-                                            type: media.type.code === 31001 ? 'affiche' : 'photo'
-                                        })
-                                    }
-                                });
-
-                                movieFiche.save(mongoDBErrorHandler);
-
-                                //fs.writeFile('/home/achille/CUBOMEDIA-WATCHER.json', JSON.stringify(result, null, 4), function(err) {
-                                //    if(err) {
-                                //        console.log(err);
-                                //    } else {
-                                //        console.log("JSON saved to " + outputFilename);
-                                //    }
-                                //});
-                            });
+                            }
                         }
                     });
                 }
@@ -105,18 +166,20 @@ module.exports = function (videoDirectory) {
         }
     };
 
-    recursive(videoDirectory, function (err, files) {
-        if (!err) {
-            files.forEach(function (file) {
-                fs.stat(file, function (err, stat) {
-                    addNewRecord(file, stat.ino);
+    for (var username in config.videoDirectories) {
+        recursive(config.videoDirectories[username], function (err, files) {
+            if (!err) {
+                files.forEach(function (file) {
+                    fs.stat(file, function (err, stat) {
+                        addNewRecord(file, stat.ino, username);
+                    });
                 });
-            });
-        }
-    });
+            }
+        });
+    }
 
-    var mongoDBErrorHandler = function(err) {
-        if(err)
+    var mongoDBErrorHandler = function (err) {
+        if (err)
             console.error('MongoDB Error: ' + err);
     };
 
@@ -126,32 +189,40 @@ module.exports = function (videoDirectory) {
     var clearDB = function () {
         Fiche.find({}, function (err, fiches) {
             console.log("Fiche found in DB : " + fiches.length);
-            dirstat.getFileStats(videoDirectory).then(function(fileStats) {
-                console.log("Fiche found in FILESYSTEM : " + fileStats.length);
+            for (var username in config.videoDirectories) {
+                if (config.videoDirectories.hasOwnProperty(username)) {
+                    dirstat.getFileStats(config.videoDirectories[username]).then(function (fileStats) {
+                        console.log("Fiche found in FILESYSTEM : " + fileStats.length);
 
-                fiches.forEach(function (fiche) {
-                    var fileStatsMatching = fileStats.filter(function(fileStat) {
-                        return fileStat.stat.ino == fiche.inode;
+                        fiches.forEach(function (fiche) {
+                            var fileStatsMatching = fileStats.filter(function (fileStat) {
+                                return fileStat.stat.ino == fiche.inode;
+                            });
+
+                            if (fileStatsMatching.length === 0) {
+                                console.log("FILE REMOVED !!!!!!!!!!!!!" + fiche.inode);
+                                Fiche.remove({inode: fiche.inode, user: username}, mongoDBErrorHandler);
+                            }
+                        });
                     });
-
-                    if(fileStatsMatching.length === 0) {
-                        console.log("FILE REMOVED !!!!!!!!!!!!!"+fiche.inode);
-                        Fiche.remove({ inode: fiche.inode }, mongoDBErrorHandler);
-                    }
-                });
-            });
+                }
+            }
         })
     };
 
-    watch.createMonitor(videoDirectory, function (monitor) {
-        monitor.on('created', function (f, stat) {
-            console.log('FILE CREATED : ', f, stat);
-            addNewRecord(f, stat.ino);
-        });
+    for (var username in config.videoDirectories) {
+        if (config.videoDirectories.hasOwnProperty(username)) {
+            watch.createMonitor(config.videoDirectories[username], function (monitor) {
+                monitor.on('created', function (f, stat) {
+                    console.log('FILE CREATED : ', f, stat);
+                    addNewRecord(f, stat.ino);
+                });
 
-        monitor.on('removed', function (f, stat) {
-            console.log('FILE REMOVED', f, stat);
-            clearDB();
-        });
-    });
+                monitor.on('removed', function (f, stat) {
+                    console.log('FILE REMOVED', f, stat);
+                    clearDB();
+                });
+            });
+        }
+    }
 };

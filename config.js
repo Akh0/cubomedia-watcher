@@ -6,7 +6,9 @@ module.exports = function () {
     switch (process.env.NODE_ENV) {
         case 'dev':
             return {
-                videoDirectory: '/home/achille/Vidéos/',
+                videoDirectories: {
+                    'akh': '/home/achille/Vidéos/'
+                },
                 mongoURI: 'mongodb://localhost/cubomedia-dev'
             };
             break;
@@ -18,7 +20,9 @@ module.exports = function () {
             break;
         case 'prod':
             return {
-                videoDirectory: '/home/akh/torrents/',
+                videoDirectories: {
+                    'akh': '/home/akh/torrents/'
+                },
                 mongoURI: 'mongodb://localhost/cubomedia'
             };
             break;

@@ -20,7 +20,9 @@ var FicheSchema = new Schema({
     posters: Array,
     link: String,
     trailerEmbedHref: String,
-    genre: String
+    genre: String,
+    user: String,
+    category: String
 });
 
 module.exports = mongoose.model('Fiche', FicheSchema);
