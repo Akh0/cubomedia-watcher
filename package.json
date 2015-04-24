@@ -6,7 +6,6 @@
     "name": "Achille",
     "email": "achille.guillon@gmail.com"
   },
-  "repository": "Akh0/cubomedia-watcher",
   "license": "MIT",
   "files": [
     "index.js",
@@ -42,5 +41,13 @@
   },
   "bin": {
     "cubomedia-watcher": "cli.js"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/Akh0/cubomedia-watcher.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Akh0/cubomedia-watcher/issues"
+  },
+  "homepage": "https://github.com/Akh0/cubomedia-watcher#readme"
 }
