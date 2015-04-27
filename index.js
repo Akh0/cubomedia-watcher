@@ -12,7 +12,7 @@ var recursive = require('recursive-readdir'),
     filetype = require('./lib/filetype'),
     dirstat = require('./lib/dirstat');
 
-mongoose.connect(config.mongoURI);
+cmModels.connect(config.mongoURI);
 
 module.exports = function () {
 
@@ -21,7 +21,6 @@ module.exports = function () {
         if (filetype.isVideo(filepath)) {
             var title = filenameParser.getWorkTitle(filepath);
             cmModels.File.findOne({inode: inode, user: username}, function (err, file) {
-
                 // Si le file n'existe pas encore
                 if (!file) {
                     var queryParams = {q: title, count: 1};
@@ -62,14 +61,18 @@ module.exports = function () {
                                     movieFile.pressRating = movie.statistics.pressRating;
                                     movieFile.userRating = movie.statistics.userRating;
                                     movieFile.link = movie.link[0].href;
-                                    movieFile.posterHref = movie.poster.href;
+
+                                    if(movie.poster)
+                                        movieFile.posterHref = movie.poster.href;
 
                                     allocineHelper.parseTrailerEmbedSrc(movie.trailerEmbed).then(function(src) {
                                         movieFile.trailerEmbedHref = src;
                                     });
 
                                     movieFile.genre = allocineHelper.getGenresInline(movie.genre);
-                                    movieFile.posters = allocineHelper.keepPosters(movie.media);
+
+                                    if(movie.media)
+                                        movieFile.posters = allocineHelper.keepPosters(movie.media);
 
                                     movieFile.save(mongoDBErrorHandler);
 
@@ -80,7 +83,7 @@ module.exports = function () {
 
                                 var tvserie = results.feed.tvseries[0];
 
-                                cmModels.Serie.findOne({ code: tvserie.code }, function(err, serie) {
+                                cmModels.Serie.findOne({ code: tvserie.code, _type: 'Serie' }, function(err, serie) {
 
                                     // On ajoute l'épisode à la série
                                     var episode = new cmModels.Episode(file);

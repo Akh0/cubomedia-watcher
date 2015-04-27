@@ -19,6 +19,7 @@ module.exports = function () {
             };
             break;
         case 'prod':
+        case 'production':
             return {
                 videoDirectories: {
                     'akh': '/home/akh/torrents/'
