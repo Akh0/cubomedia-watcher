@@ -4,7 +4,7 @@ module.exports = function () {
     console.log("Environment : " + process.env.NODE_ENV);
 
     switch (process.env.NODE_ENV) {
-        case 'dev':
+        case 'development':
             return {
                 videoDirectories: {
                     'akh': '/home/achille/Vidéos/'

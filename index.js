@@ -14,8 +14,6 @@ var recursive = require('recursive-readdir'),
 
 mongoose.connect(config.mongoURI);
 
-
-//console.log(cubomediaModels);
 module.exports = function () {
 
     var addNewRecord = function (filepath, inode, username) {
@@ -24,7 +22,7 @@ module.exports = function () {
             var title = filenameParser.getWorkTitle(filepath);
             cmModels.File.findOne({inode: inode, user: username}, function (err, file) {
 
-                // Si la file n'existe pas encore
+                // Si le file n'existe pas encore
                 if (!file) {
                     var queryParams = {q: title, count: 1};
 
@@ -75,13 +73,7 @@ module.exports = function () {
 
                                     movieFile.save(mongoDBErrorHandler);
 
-                                    //fs.writeFile('/home/achille/CUBOMEDIA-WATCHER.json', JSON.stringify(result, null, 4), function(err) {
-                                    //    if(err) {
-                                    //        console.log(err);
-                                    //    } else {
-                                    //        console.log("JSON saved to " + outputFilename);
-                                    //    }
-                                    //});
+                                    //allocineHelper.stringifyInFile(result, '/home/achille/CUBOMEDIA-WATCHER.json');
                                 });
                             }
                             else if(results.feed.tvseries) {
@@ -90,16 +82,34 @@ module.exports = function () {
 
                                 cmModels.Serie.findOne({ code: tvserie.code }, function(err, serie) {
 
-                                    // On a pas encore d'épisode de la série, on créé la serie
-                                    if(!file) {
-                                        allocine.api('tvseries', { code: tvserie.code, profile: 'large' }, function (err, result) {
-                                            if(err)
-                                                return;
+                                    // On ajoute l'épisode à la série
+                                    var episode = new cmModels.Episode(file);
 
-                                            var serie = cmModels.Serie();
+                                    episode.seasonNumber = filenameParser.getSeasonNumber(filepath);
+                                    episode.episodeNumber = filenameParser.getEpisodeNumber(filepath);
+
+
+                                    // On rattache l'épisode à la série
+                                    if(serie) {
+                                        console.log("serie already exists");
+                                        episode._serie = serie._id;
+                                        episode.save(mongoDBErrorHandler);
+                                    }
+                                    else { // On a pas encore d'épisode de la série, on créé la serie
+                                        var serie = new cmModels.Serie();
+                                        serie.code = tvserie.code;
+                                        serie.user = username;
+                                        serie.save(mongoDBErrorHandler);
+
+                                        allocine.api('tvseries', { code: tvserie.code, profile: 'large' }, function (err, result) {
+                                            if(err) {
+                                                serie.remove(mongoDBErrorHandler);
+                                                console.log("SERIE ALLOCINE API ERR"+err);
+                                                return;
+                                            }
+                                            console.log("serie not exists");
 
                                             var tvserie = result.tvseries;
-                                            serie.code = tvserie.code;
 
                                             serie.originalTitle = tvserie.originalTitle;
                                             serie.title = tvserie.title;
@@ -117,17 +127,16 @@ module.exports = function () {
                                             serie.genre = allocineHelper.getGenresInline(tvserie.genre);
                                             serie.posters = allocineHelper.keepPosters(tvserie.media);
 
-                                            serie.save(mongoDBErrorHandler);
+                                            serie.save(function(err) {
+                                                if(err) {
+                                                    return mongoDBErrorHandler(err);
+                                                }
+
+                                                episode._serie = serie._id;
+                                                episode.save(mongoDBErrorHandler);
+                                            });
                                         });
                                     }
-
-                                    // On ajoute l'épisode à la série
-                                    var episode = new cmModels.Episode(file);
-
-                                    episode.seasonNumber = filenameParser.getSeasonNumber(filepath);
-                                    episode.episodeNumber = filenameParser.getEpisodeNumber(filepath);
-
-                                    episode.save(mongoDBErrorHandler);
                                 });
                             }
                         }
@@ -155,8 +164,8 @@ module.exports = function () {
     };
 
     /**
-     * Nettoie la base des files n'étant plus rattachées à un fichier (comparaison basée sur l'inode)
-     */
+    * Nettoie la base des files n'étant plus rattachées à un fichier (comparaison basée sur l'inode)
+    */
     var clearDB = function () {
         cmModels.File.find({}, function (err, files) {
             console.log("File found in DB : " + files.length);
@@ -186,7 +195,7 @@ module.exports = function () {
             watch.createMonitor(config.videoDirectories[username], function (monitor) {
                 monitor.on('created', function (f, stat) {
                     console.log('FILE CREATED : ', f, stat);
-                    addNewRecord(f, stat.ino);
+                    addNewRecord(f, stat.ino, username);
                 });
 
                 monitor.on('removed', function (f, stat) {

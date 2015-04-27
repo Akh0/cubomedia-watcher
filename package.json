@@ -17,6 +17,7 @@
   ],
   "dependencies": {
     "allocine-api": "^0.1.6",
+    "cubomedia-models": "file:../cubomedia-models",
     "grunt-rsync": "^0.6.2",
     "htmlparser2": "^3.8.2",
     "meow": "^3.1.0",
