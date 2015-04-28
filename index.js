@@ -66,6 +66,10 @@ module.exports = function () {
                                 deferred.resolve(true);
                             });
                         }
+                        else {
+                            console.log("NI FILM NI SÉRIE : ");
+                            console.log(results.feed);
+                        }
                     }, function (err) {
                         console.log(err);
                     });
