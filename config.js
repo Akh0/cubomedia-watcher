@@ -22,7 +22,15 @@ module.exports = function () {
         case 'production':
             return {
                 videoDirectories: {
-                    'akh': '/home/akh/torrents/'
+                    'akh': '/home/akh/torrents/',
+                    'bglacial': '/home/bglacial/torrents/',
+                    'damibironn': '/home/damibironn/torrents/',
+                    //'fredoln': '/home/fredoln/torrents/',
+                    'pleox': '/home/pleox/torrents/',
+                    //'tony': '/home/tony/torrents/',
+                    //'tuxor': '/home/tuxor/torrents/',
+                    //'victor': '/home/victor/torrents/',
+                    //'yann': '/home/yann/torrents/'
                 },
                 mongoURI: 'mongodb://localhost/cubomedia'
             };
