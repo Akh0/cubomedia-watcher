@@ -1,16 +1,14 @@
 'use strict';
 
-var recursive = require('recursive-readdir'),
-    watch = require('watch'),
-    fs = require('fs'),
+var watch = require('watch'),
     allocineHelper = require('./lib/allocine-api-helper'),
     cmModels = require('cubomedia-models'),
     config = require('./config'),
     filenameParser = require('./lib/filename-parser'),
     filetype = require('./lib/filetype'),
     dirstat = require('./lib/dirstat'),
-    async = require('async'),
-    q = require('q');
+    q = require('q'),
+    sleep = require('sleep');
 
 cmModels.connect(config.mongoURI);
 
@@ -19,9 +17,23 @@ var File = cmModels.File,
     Serie = cmModels.Serie,
     Episode = cmModels.Episode;
 
-module.exports = function () {
+var tempSerie = {
+    _series: {},
+    tempSave: function (serie) {
+        if (typeof this._series[serie.code] === 'undefined')
+            this._series[serie.code] = {};
 
-    var mySeries = [];
+        this._series[serie.code][serie.user] = serie;
+    },
+    isTempSaved: function (codeSerie, username) {
+        return typeof this._series[codeSerie] !== 'undefined' && typeof this._series[codeSerie][username] !== 'undefined';
+    },
+    getTempSerieID: function (codeSerie, username) {
+        return this._series[codeSerie][username]._id;
+    }
+};
+
+module.exports = function () {
 
     /**
      *
@@ -33,13 +45,13 @@ module.exports = function () {
         var deferred = q.defer();
 
         if (filetype.isVideo(filepath)) {
-
             File.findOne({inode: inode, user: username}, function (err, file) {
                 if (err) {
                     return mongoDBErrorHandler(err);
                 }
 
                 if (!file) {
+                    // Préparation de la requête Allocine
                     var queryParams = {
                         q: filenameParser.getWorkTitle(filepath),
                         filter: filenameParser.isSerie(filepath) ? 'tvseries' : 'movie',
@@ -47,6 +59,8 @@ module.exports = function () {
                     };
 
                     allocineHelper.search(queryParams).then(function (results) {
+                        sleep.sleep(1); // On ménage l'API allocine
+
                         var file = new File({
                             filepath: filepath,
                             name: queryParams.q,
@@ -67,11 +81,10 @@ module.exports = function () {
                             });
                         }
                         else {
-                            console.log("NI FILM NI SÉRIE : ");
-                            console.log(results.feed);
+                            console.log("NI FILM NI SÉRIE POUR : " + queryParams.q, results.feed);
                         }
                     }, function (err) {
-                        console.log(err);
+                        console.log('Allocine API Search Error: ' + err, queryParams);
                     });
                 }
             });
@@ -82,7 +95,9 @@ module.exports = function () {
 
     /**
      *
-     * @param File file
+     * @param file
+     * @param movie
+     * @returns {*}
      */
     var makeMovieRecord = function (file, movie) {
         var deferred = q.defer();
@@ -117,6 +132,8 @@ module.exports = function () {
                     err ? deferred.reject(err) : deferred.resolve(true);
                 });
             });
+
+            sleep.sleep(1);
         });
 
         return deferred;
@@ -129,7 +146,6 @@ module.exports = function () {
     var makeSerieRecord = function (file, tvserie) {
         var deferred = q.defer();
 
-
         // On ajoute l'épisode à la série
         var episode = new Episode(file);
 
@@ -137,9 +153,8 @@ module.exports = function () {
         episode.episodeNumber = filenameParser.getEpisodeNumber(file.filepath);
 
         // On rattache l'épisode à la série
-        if (typeof mySeries[tvserie.code] !== 'undefined') {
-            console.log("serie already exists");
-            episode._serie = mySeries[tvserie]._id;
+        if (tempSerie.isTempSaved(tvserie.code, file.user)) {
+            episode._serie = tempSerie.getTempSerieID(tvserie.code, file.user);
             episode.save(function (err) {
                 err ? deferred.reject(err) : deferred.resolve(true);
             });
@@ -147,8 +162,8 @@ module.exports = function () {
         else { // On a pas encore d'épisode de la série, on créé la serie
             var serie = new Serie();
             serie.code = tvserie.code;
-            mySeries[serie.code] = serie;
             serie.user = file.user;
+            tempSerie.tempSave(serie);
             serie.save(mongoDBErrorHandler);
 
             allocineHelper.findSerieFromCode(tvserie.code).then(function (result) {
@@ -181,6 +196,8 @@ module.exports = function () {
                         }
                     });
                 });
+
+                sleep.sleep(1);
             });
         }
 
@@ -191,45 +208,60 @@ module.exports = function () {
      *
      */
     var init = function () {
-        Serie.find({_type: 'Serie'}, function (err, series) {
+        Serie.find(function (err, series) {
             if (err) {
                 return mongoDBErrorHandler(err);
             }
 
             series.forEach(function (serie) {
-                mySeries[serie.code] = serie;
+                tempSerie.tempSave(serie);
             });
 
             for (var username in config.videoDirectories) {
-                recursive(config.videoDirectories[username], function (err, files) {
-                    if (!err) {
-                        files.forEach(function (file) {
-                            fs.stat(file, function (err, stat) {
-                                addNewRecord(file, stat.ino, username);
-                            });
-                        });
-                    }
-                });
+                if (config.videoDirectories.hasOwnProperty(username)) {
+                    browseDirectory(username, config.videoDirectories[username]);
+                }
             }
 
             for (var username in config.videoDirectories) {
                 if (config.videoDirectories.hasOwnProperty(username)) {
-                    watch.createMonitor(config.videoDirectories[username], function (monitor) {
-                        monitor.on('created', function (f, stat) {
-                            console.log('FILE CREATED : ', f, stat);
-                            addNewRecord(f, stat.ino, username);
-                        });
-
-                        monitor.on('removed', function (f, stat) {
-                            console.log('FILE REMOVED', f, stat);
-                            clearDB();
-                        });
-                    });
+                    monitorDirectory(username, config.videoDirectories[username]);
                 }
             }
         });
     };
 
+    /**
+     *
+     * @param username
+     * @param directory
+     */
+    var monitorDirectory = function (username, directory) {
+        watch.createMonitor(directory, function (monitor) {
+            monitor.on('created', function (f, stat) {
+                console.log('FILE CREATED : ', f, stat);
+                addNewRecord(f, stat.ino, username);
+            });
+
+            monitor.on('removed', function (f, stat) {
+                console.log('FILE REMOVED', f, stat);
+                clearDB();
+            });
+        });
+    };
+
+    /**
+     *
+     * @param username
+     * @param directory
+     */
+    var browseDirectory = function (username, directory) {
+        dirstat.getFileStats(directory).then(function (files) {
+            files.forEach(function (file) {
+                addNewRecord(file.name, file.stat.ino, username);
+            });
+        });
+    };
 
     var mongoDBErrorHandler = function (err) {
         if (err)
@@ -241,26 +273,44 @@ module.exports = function () {
      */
     var clearDB = function () {
         File.find({}, function (err, files) {
-            console.log("File found in DB : " + files.length);
             for (var username in config.videoDirectories) {
                 if (config.videoDirectories.hasOwnProperty(username)) {
                     dirstat.getFileStats(config.videoDirectories[username]).then(function (fileStats) {
-                        console.log("File found in FILESYSTEM : " + fileStats.length);
 
                         files.forEach(function (file) {
+                            // Si le file de la base n'est rattaché à aucun fichier physique -> on le supprime
                             var fileStatsMatching = fileStats.filter(function (fileStat) {
-                                return fileStat.stat.ino == file.inode;
+                                return fileStat.stat.ino === file.inode && username === file.user;
                             });
 
-                            if (fileStatsMatching.length === 0) {
-                                console.log("FILE REMOVED !!!!!!!!!!!!!" + file.inode);
-                                File.remove({inode: file.inode, user: username}, mongoDBErrorHandler);
+                            if (0 === fileStatsMatching.length) {
+                                removeFile(file);
                             }
                         });
                     });
                 }
             }
         })
+    };
+
+    /**
+     * Supprime un file et sa série s'il s'agit d'un dernier épisode d'une série
+     * @param file
+     */
+    var removeFile = function (file) {
+        File.remove({inode: file.inode, user: file.user}, function (err) {
+            if (err)
+                return mongoDBErrorHandler(err);
+
+            // On supprime la série quand on arrive sur le dernier épisode
+            if (file instanceof Episode) {
+                Episode.count({_serie: file._serie}, function (err, nbEpisodes) {
+                    if (0 === nbEpisodes) {
+                        Serie.remove({_id: file._serie}, mongoDBErrorHandler);
+                    }
+                });
+            }
+        });
     };
 
     init();

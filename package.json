@@ -28,6 +28,7 @@
     "mongoose": "^4.0.1",
     "q": "^1.2.0",
     "recursive-readdir": "^1.2.1",
+    "sleep": "^2.0.0",
     "watch": "^0.15.0"
   },
   "devDependencies": {
